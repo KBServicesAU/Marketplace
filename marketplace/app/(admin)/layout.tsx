@@ -1,15 +1,16 @@
-import { redirect } from 'next/navigation'
-import { createClient } from '@/lib/supabase/server'
+'use client'
+
+import { usePathname } from 'next/navigation'
 import AdminNav from '@/components/admin/AdminNav'
 
-export default async function AdminLayout({ children }: { children: React.ReactNode }) {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+// Auth is handled by middleware.ts — this layout is UI only.
+// The login page skips the sidebar via pathname check.
+export default function AdminLayout({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname()
 
-  if (!user) redirect('/admin/login')
-
-  const adminEmails = (process.env.ADMIN_EMAILS ?? '').split(',').map((e) => e.trim())
-  if (!adminEmails.includes(user.email ?? '')) redirect('/')
+  if (pathname === '/admin/login') {
+    return <>{children}</>
+  }
 
   return (
     <div className="flex min-h-screen bg-gray-50">
