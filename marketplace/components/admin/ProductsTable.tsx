@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import ProductDetailPanel from './ProductDetailPanel'
 
@@ -49,6 +49,8 @@ export default function ProductsTable({
   const [selected, setSelected] = useState<Product | null>(null)
   const [categorizing, setCategorizing] = useState(false)
   const [catResult, setCatResult] = useState('')
+  const [progressLog, setProgressLog] = useState<Array<{ step: string; message: string }>>([])
+  const logRef = useRef<HTMLDivElement>(null)
 
   function getSupplier(p: Product) {
     return Array.isArray(p.suppliers) ? p.suppliers[0] : p.suppliers
@@ -74,20 +76,52 @@ export default function ProductsTable({
     router.refresh()
   }
 
+  // Auto-scroll the progress log to the bottom when new lines arrive
+  useEffect(() => {
+    if (logRef.current) {
+      logRef.current.scrollTop = logRef.current.scrollHeight
+    }
+  }, [progressLog])
+
   async function handleAiCategorize() {
     setCategorizing(true)
     setCatResult('')
+    setProgressLog([])
+
     try {
       const res = await fetch('/api/admin/categorize', { method: 'POST' })
-      const data = await res.json()
-      if (res.ok) {
-        setCatResult(data.message)
-        router.refresh()
-      } else {
-        setCatResult(`Error: ${data.error}`)
+      if (!res.body) throw new Error('No response body')
+
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() ?? ''
+
+        for (const line of lines) {
+          if (!line.trim()) continue
+          try {
+            const msg = JSON.parse(line) as { step: string; message: string }
+            setProgressLog((prev) => [...prev, msg])
+            if (msg.step === 'done') {
+              setCatResult(msg.message)
+              router.refresh()
+            } else if (msg.step === 'error') {
+              setCatResult(`Error: ${msg.message}`)
+            }
+          } catch {
+            // ignore malformed lines
+          }
+        }
       }
     } catch {
-      setCatResult('Network error')
+      setCatResult('Network error — check the browser console.')
     } finally {
       setCategorizing(false)
     }
@@ -122,9 +156,47 @@ export default function ProductsTable({
         </button>
       </div>
 
-      {catResult && (
-        <div className={`mb-4 px-4 py-3 rounded-lg text-sm ${catResult.startsWith('Error') ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-green-50 text-green-700 border border-green-200'}`}>
-          {catResult}
+      {/* Live progress log — shown while running and after completion */}
+      {progressLog.length > 0 && (
+        <div className="mb-4 rounded-xl border border-gray-200 overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-2 bg-gray-50 border-b border-gray-200">
+            <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">AI Categorization Progress</span>
+            {categorizing && (
+              <span className="flex items-center gap-1.5 text-xs text-purple-600">
+                <span className="w-1.5 h-1.5 rounded-full bg-purple-500 animate-pulse" />
+                Running…
+              </span>
+            )}
+            {!categorizing && catResult && (
+              <button
+                onClick={() => { setProgressLog([]); setCatResult('') }}
+                className="text-xs text-gray-400 hover:text-gray-600"
+              >
+                Dismiss
+              </button>
+            )}
+          </div>
+          <div
+            ref={logRef}
+            className="px-4 py-3 space-y-1 max-h-52 overflow-y-auto bg-white font-mono text-xs"
+          >
+            {progressLog.map((msg, i) => (
+              <div
+                key={i}
+                className={`flex items-start gap-2 ${
+                  msg.step === 'error' ? 'text-red-600' :
+                  msg.step === 'done' ? 'text-green-700 font-semibold' :
+                  msg.step === 'progress' ? 'text-blue-700' :
+                  'text-gray-500'
+                }`}
+              >
+                <span className="shrink-0 select-none">
+                  {msg.step === 'done' ? '✓' : msg.step === 'error' ? '✗' : msg.step === 'progress' ? '→' : '·'}
+                </span>
+                <span>{msg.message}</span>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

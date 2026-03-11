@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
 import { createServiceClient } from '@/lib/supabase/server'
 
@@ -14,47 +14,97 @@ async function checkAdmin(req: NextRequest): Promise<boolean> {
   return adminEmails.includes(user.email ?? '')
 }
 
+type ProgressMsg =
+  | { step: 'loading' | 'grouping' | 'ai' | 'creating' | 'assigning' | 'progress'; message: string }
+  | { step: 'done'; message: string; assigned: number; created: number; total: number }
+  | { step: 'error'; message: string }
+
+const BATCH_SIZE = 80
+
 export async function POST(req: NextRequest) {
-  if (!await checkAdmin(req)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (!await checkAdmin(req)) {
+    return new Response(JSON.stringify({ step: 'error', message: 'Unauthorized' }) + '\n', { status: 401 })
+  }
 
   const apiKey = process.env.ANTHROPIC_API_KEY
-  if (!apiKey) return NextResponse.json({ error: 'ANTHROPIC_API_KEY not set in environment' }, { status: 500 })
-
-  const supabase = createServiceClient()
-
-  const { data: categories } = await supabase
-    .from('marketplace_categories')
-    .select('id, name, slug, margin_percentage')
-    .order('name')
-
-  const { data: uncategorized } = await supabase
-    .from('marketplace_products')
-    .select('id, name, attributes')
-    .is('category_id', null)
-    .limit(2000)
-
-  if (!uncategorized || uncategorized.length === 0) {
-    return NextResponse.json({ message: 'All products are already categorized!', assigned: 0, created: 0 })
+  if (!apiKey || apiKey === 'YOUR_ANTHROPIC_API_KEY_HERE') {
+    return new Response(
+      JSON.stringify({ step: 'error', message: 'ANTHROPIC_API_KEY not configured in .env.local' }) + '\n',
+      { status: 500 }
+    )
   }
 
-  // Group products by their categoryHint or brand from attributes
-  const hintGroups: Record<string, string[]> = {}
-  for (const p of uncategorized) {
-    const attrs = p.attributes as Record<string, string> | null
-    const hint = attrs?.categoryHint ?? attrs?.brand ?? p.name.split(' ')[0] ?? 'General'
-    if (!hintGroups[hint]) hintGroups[hint] = []
-    hintGroups[hint].push(p.id)
-  }
+  const encoder = new TextEncoder()
 
-  const uniqueHints = Object.keys(hintGroups).slice(0, 80)
+  const stream = new ReadableStream({
+    async start(controller) {
+      function send(msg: ProgressMsg) {
+        controller.enqueue(encoder.encode(JSON.stringify(msg) + '\n'))
+      }
 
-  const catList = (categories ?? []).length > 0
-    ? (categories ?? []).map((c) => `- ${c.name} (id: ${c.id})`).join('\n')
-    : '(none yet — create new categories as needed)'
+      try {
+        const supabase = createServiceClient()
 
-  const hintList = uniqueHints.map((h, i) => `${i + 1}. "${h}"`).join('\n')
+        send({ step: 'loading', message: 'Loading existing categories…' })
 
-  const prompt = `You are a product categorization assistant for an Australian IT and office supplies marketplace.
+        const { data: categoriesRaw } = await supabase
+          .from('marketplace_categories')
+          .select('id, name, slug, margin_percentage')
+          .order('name')
+
+        // Mutable list so newly created categories are included in subsequent batches
+        const liveCategories: Array<{ id: string; name: string; slug: string; margin_percentage: number }> =
+          [...(categoriesRaw ?? [])]
+
+        send({ step: 'loading', message: 'Fetching uncategorized products…' })
+
+        // Fetch ALL uncategorized products (no limit — batching happens at the hint level)
+        const { data: uncategorized } = await supabase
+          .from('marketplace_products')
+          .select('id, name, attributes')
+          .is('category_id', null)
+
+        if (!uncategorized || uncategorized.length === 0) {
+          send({ step: 'done', message: 'All products are already categorized!', assigned: 0, created: 0, total: 0 })
+          controller.close()
+          return
+        }
+
+        send({ step: 'loading', message: `Found ${uncategorized.length.toLocaleString()} uncategorized products. Grouping by category hint…` })
+
+        // Group product IDs by their hint (categoryHint attr, brand attr, or first word of name)
+        const hintGroups: Record<string, string[]> = {}
+        for (const p of uncategorized) {
+          const attrs = p.attributes as Record<string, string> | null
+          const hint = attrs?.categoryHint ?? attrs?.brand ?? p.name.split(' ')[0] ?? 'General'
+          if (!hintGroups[hint]) hintGroups[hint] = []
+          hintGroups[hint].push(p.id)
+        }
+
+        const allHints = Object.keys(hintGroups)
+        const totalBatches = Math.ceil(allHints.length / BATCH_SIZE)
+
+        send({
+          step: 'grouping',
+          message: `${allHints.length} unique hints found → ${totalBatches} batch${totalBatches !== 1 ? 'es' : ''} of ${BATCH_SIZE} to send to Claude.`,
+        })
+
+        let totalAssigned = 0
+        let totalCreated = 0
+
+        for (let batchIdx = 0; batchIdx < allHints.length; batchIdx += BATCH_SIZE) {
+          const batchHints = allHints.slice(batchIdx, batchIdx + BATCH_SIZE)
+          const batchNum = Math.floor(batchIdx / BATCH_SIZE) + 1
+
+          send({ step: 'ai', message: `Batch ${batchNum}/${totalBatches} — asking Claude about ${batchHints.length} hints…` })
+
+          const catList = liveCategories.length > 0
+            ? liveCategories.map((c) => `- ${c.name} (id: ${c.id})`).join('\n')
+            : '(none yet — create new categories as needed)'
+
+          const hintList = batchHints.map((h, i) => `${i + 1}. "${h}"`).join('\n')
+
+          const prompt = `You are a product categorization assistant for an Australian IT and office supplies marketplace.
 
 Existing categories:
 ${catList}
@@ -66,7 +116,7 @@ For each hint, either match it to an existing category (use the exact id) or sug
 
 Rules:
 - Be practical — think what a customer would search for
-- Group similar items (e.g. "Printers", "Printer Ink & Toner", "Labels & Tape", "Networking", "Cables")
+- Group similar items (e.g. "Printers", "Printer Ink & Toner", "Labels & Tape", "Networking", "Cables", "Monitors", "Laptops")
 - Prefer matching existing categories over creating new ones
 - Only create new categories when there is no reasonable existing match
 
@@ -76,83 +126,122 @@ Respond with ONLY valid JSON, no explanation, no markdown fences:
   "newCategories": [{ "name": "Category Name", "hints": ["hint1", "hint2"] }]
 }`
 
-  let aiResponse: string
-  try {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'claude-haiku-4-5',
-        max_tokens: 2048,
-        messages: [{ role: 'user', content: prompt }],
-      }),
-    })
-    const data = await res.json()
-    if (!res.ok) throw new Error(data.error?.message ?? `Anthropic ${res.status}`)
-    aiResponse = data.content[0].text
-  } catch (err) {
-    return NextResponse.json({ error: `AI request failed: ${String(err)}` }, { status: 500 })
-  }
+          let aiResponse: string
+          try {
+            const res = await fetch('https://api.anthropic.com/v1/messages', {
+              method: 'POST',
+              headers: {
+                'x-api-key': apiKey,
+                'anthropic-version': '2023-06-01',
+                'content-type': 'application/json',
+              },
+              body: JSON.stringify({
+                model: 'claude-haiku-4-5',
+                max_tokens: 2048,
+                messages: [{ role: 'user', content: prompt }],
+              }),
+            })
+            const data = await res.json()
+            if (!res.ok) throw new Error(data.error?.message ?? `Anthropic ${res.status}`)
+            aiResponse = data.content[0].text
+          } catch (err) {
+            send({ step: 'error', message: `Batch ${batchNum}: AI request failed — ${String(err)}` })
+            // Continue with next batch rather than aborting entirely
+            continue
+          }
 
-  let parsed: {
-    assignments: Record<string, string | null>
-    newCategories: Array<{ name: string; hints: string[] }>
-  }
-  try {
-    const jsonMatch = aiResponse.match(/\{[\s\S]*\}/)
-    parsed = JSON.parse(jsonMatch?.[0] ?? aiResponse)
-  } catch {
-    return NextResponse.json({ error: 'AI returned invalid JSON', raw: aiResponse.slice(0, 500) }, { status: 500 })
-  }
+          let parsed: {
+            assignments: Record<string, string | null>
+            newCategories: Array<{ name: string; hints: string[] }>
+          }
+          try {
+            const jsonMatch = aiResponse.match(/\{[\s\S]*\}/)
+            parsed = JSON.parse(jsonMatch?.[0] ?? aiResponse)
+          } catch {
+            send({ step: 'error', message: `Batch ${batchNum}: Claude returned invalid JSON — skipping.` })
+            continue
+          }
 
-  let assigned = 0
-  let created = 0
-  const newCatMap: Record<string, string> = {}
+          // Create new categories suggested by Claude
+          const newCatMap: Record<string, string> = {}
+          const newCats = parsed.newCategories ?? []
+          if (newCats.length > 0) {
+            send({ step: 'creating', message: `Batch ${batchNum}: creating ${newCats.length} new categor${newCats.length !== 1 ? 'ies' : 'y'}…` })
+          }
 
-  // Create new categories
-  for (const newCat of (parsed.newCategories ?? [])) {
-    const slug = newCat.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
-    const { data: inserted } = await supabase
-      .from('marketplace_categories')
-      .upsert({ name: newCat.name, slug, margin_percentage: 30 }, { onConflict: 'slug' })
-      .select('id')
-      .single()
-    if (inserted) {
-      for (const hint of (newCat.hints ?? [])) newCatMap[hint] = inserted.id
-      created++
-    }
-  }
+          for (const newCat of newCats) {
+            const slug = newCat.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+            const { data: inserted } = await supabase
+              .from('marketplace_categories')
+              .upsert({ name: newCat.name, slug, margin_percentage: 30 }, { onConflict: 'slug' })
+              .select('id, name, slug, margin_percentage')
+              .single()
+            if (inserted) {
+              for (const hint of (newCat.hints ?? [])) newCatMap[hint] = inserted.id
+              // Add to live list so subsequent batches can reuse it
+              if (!liveCategories.find((c) => c.id === inserted.id)) {
+                liveCategories.push(inserted)
+              }
+              totalCreated++
+            }
+          }
 
-  // Apply category assignments
-  for (const [hint, catId] of Object.entries(parsed.assignments ?? {})) {
-    const resolvedId = catId ?? newCatMap[hint]
-    if (!resolvedId) continue
-    const ids = hintGroups[hint] ?? []
-    if (ids.length === 0) continue
-    const { error } = await supabase
-      .from('marketplace_products')
-      .update({ category_id: resolvedId })
-      .in('id', ids)
-    if (!error) assigned += ids.length
-  }
+          // Apply category assignments to products
+          let batchAssigned = 0
 
-  // Apply new category assignments for hints not in assignments
-  for (const [hint, catId] of Object.entries(newCatMap)) {
-    if (parsed.assignments?.[hint] !== undefined) continue
-    const ids = hintGroups[hint] ?? []
-    if (ids.length === 0) continue
-    await supabase.from('marketplace_products').update({ category_id: catId }).in('id', ids)
-    assigned += ids.length
-  }
+          for (const [hint, catId] of Object.entries(parsed.assignments ?? {})) {
+            const resolvedId = catId ?? newCatMap[hint]
+            if (!resolvedId) continue
+            const ids = hintGroups[hint] ?? []
+            if (ids.length === 0) continue
+            const { error } = await supabase
+              .from('marketplace_products')
+              .update({ category_id: resolvedId })
+              .in('id', ids)
+            if (!error) batchAssigned += ids.length
+          }
 
-  return NextResponse.json({
-    message: `Done! Assigned ${assigned} products to categories, created ${created} new categories.`,
-    assigned,
-    created,
-    totalUncategorized: uncategorized.length,
+          // Apply assignments for hints that only appear in newCategories (not in assignments map)
+          for (const [hint, catId] of Object.entries(newCatMap)) {
+            if (parsed.assignments?.[hint] !== undefined) continue
+            const ids = hintGroups[hint] ?? []
+            if (ids.length === 0) continue
+            const { error } = await supabase
+              .from('marketplace_products')
+              .update({ category_id: catId })
+              .in('id', ids)
+            if (!error) batchAssigned += ids.length
+          }
+
+          totalAssigned += batchAssigned
+
+          send({
+            step: 'progress',
+            message: `Batch ${batchNum}/${totalBatches} done — assigned ${batchAssigned.toLocaleString()} products (${totalAssigned.toLocaleString()} total so far)`,
+          })
+        }
+
+        send({
+          step: 'done',
+          message: `Done! Assigned ${totalAssigned.toLocaleString()} products across ${totalCreated} new categor${totalCreated !== 1 ? 'ies' : 'y'}.`,
+          assigned: totalAssigned,
+          created: totalCreated,
+          total: uncategorized.length,
+        })
+      } catch (err) {
+        send({ step: 'error', message: `Unexpected error: ${String(err)}` })
+      } finally {
+        controller.close()
+      }
+    },
+  })
+
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/plain; charset=utf-8',
+      'Transfer-Encoding': 'chunked',
+      'X-Content-Type-Options': 'nosniff',
+      'Cache-Control': 'no-cache',
+    },
   })
 }
