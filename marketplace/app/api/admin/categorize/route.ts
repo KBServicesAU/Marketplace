@@ -58,19 +58,29 @@ export async function POST(req: NextRequest) {
 
         send({ step: 'loading', message: 'Fetching uncategorized products…' })
 
-        // Fetch ALL uncategorized products (no limit — batching happens at the hint level)
-        const { data: uncategorized } = await supabase
-          .from('marketplace_products')
-          .select('id, name, attributes')
-          .is('category_id', null)
+        // Supabase caps at 1,000 rows per request — paginate to get ALL uncategorized products
+        const PAGE_SIZE = 1000
+        let pageIndex = 0
+        const uncategorized: Array<{ id: string; name: string; attributes: Record<string, string> | null }> = []
+        while (true) {
+          const { data: page } = await supabase
+            .from('marketplace_products')
+            .select('id, name, attributes')
+            .is('category_id', null)
+            .range(pageIndex * PAGE_SIZE, (pageIndex + 1) * PAGE_SIZE - 1)
+          if (!page || page.length === 0) break
+          uncategorized.push(...page)
+          if (page.length < PAGE_SIZE) break
+          pageIndex++
+        }
 
-        if (!uncategorized || uncategorized.length === 0) {
+        if (uncategorized.length === 0) {
           send({ step: 'done', message: 'All products are already categorized!', assigned: 0, created: 0, total: 0 })
           controller.close()
           return
         }
 
-        send({ step: 'loading', message: `Found ${uncategorized.length.toLocaleString()} uncategorized products. Grouping by category hint…` })
+        send({ step: 'loading', message: `Found ${uncategorized.length.toLocaleString()} uncategorized products across ${pageIndex + 1} page${pageIndex > 0 ? 's' : ''}. Grouping by category hint…` })
 
         // Group product IDs by their hint (categoryHint attr, brand attr, or first word of name)
         const hintGroups: Record<string, string[]> = {}
@@ -186,6 +196,21 @@ Respond with ONLY valid JSON, no explanation, no markdown fences:
             }
           }
 
+          // Update products in chunks of 500 to avoid PostgREST request-size limits
+          async function assignCategory(ids: string[], categoryId: string): Promise<number> {
+            const CHUNK = 500
+            let count = 0
+            for (let ci = 0; ci < ids.length; ci += CHUNK) {
+              const chunk = ids.slice(ci, ci + CHUNK)
+              const { error } = await supabase
+                .from('marketplace_products')
+                .update({ category_id: categoryId })
+                .in('id', chunk)
+              if (!error) count += chunk.length
+            }
+            return count
+          }
+
           // Apply category assignments to products
           let batchAssigned = 0
 
@@ -194,11 +219,7 @@ Respond with ONLY valid JSON, no explanation, no markdown fences:
             if (!resolvedId) continue
             const ids = hintGroups[hint] ?? []
             if (ids.length === 0) continue
-            const { error } = await supabase
-              .from('marketplace_products')
-              .update({ category_id: resolvedId })
-              .in('id', ids)
-            if (!error) batchAssigned += ids.length
+            batchAssigned += await assignCategory(ids, resolvedId)
           }
 
           // Apply assignments for hints that only appear in newCategories (not in assignments map)
@@ -206,11 +227,7 @@ Respond with ONLY valid JSON, no explanation, no markdown fences:
             if (parsed.assignments?.[hint] !== undefined) continue
             const ids = hintGroups[hint] ?? []
             if (ids.length === 0) continue
-            const { error } = await supabase
-              .from('marketplace_products')
-              .update({ category_id: catId })
-              .in('id', ids)
-            if (!error) batchAssigned += ids.length
+            batchAssigned += await assignCategory(ids, catId)
           }
 
           totalAssigned += batchAssigned
