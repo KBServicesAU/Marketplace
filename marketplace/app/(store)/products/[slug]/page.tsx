@@ -21,7 +21,15 @@ export default async function ProductPage({ params }: { params: Promise<{ slug: 
   const supplier = Array.isArray(product.suppliers) ? product.suppliers[0] : product.suppliers
   const category = Array.isArray(product.marketplace_categories) ? product.marketplace_categories[0] : product.marketplace_categories
 
-  const images: string[] = product.images ?? []
+  function normalizeUrl(url: string): string | null {
+    if (url.startsWith('http://') || url.startsWith('https://')) return url
+    if (url.startsWith('www.')) return `https://${url}`
+    return null
+  }
+
+  const images: string[] = (product.images ?? [])
+    .map((u: string) => normalizeUrl(u))
+    .filter((u: string | null): u is string => u !== null)
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-10">
