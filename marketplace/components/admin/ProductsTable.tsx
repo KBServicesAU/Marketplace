@@ -34,6 +34,8 @@ export default function ProductsTable({
   totalPages,
   q,
   supplierId,
+  categoryId,
+  activeFilter,
 }: {
   products: Product[]
   categories: Category[]
@@ -43,6 +45,8 @@ export default function ProductsTable({
   totalPages: number
   q?: string
   supplierId?: string
+  categoryId?: string
+  activeFilter?: string
 }) {
   const router = useRouter()
   const [products, setProducts] = useState(initialProducts)
@@ -131,16 +135,26 @@ export default function ProductsTable({
     <>
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-3 mb-6">
-        <form className="flex gap-2 flex-1 min-w-0">
+        <form className="flex gap-2 flex-1 min-w-0 flex-wrap">
           <input
             name="q"
             defaultValue={q}
             placeholder="Search products…"
-            className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm min-w-0"
+            className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm min-w-[160px]"
           />
           <select name="supplier" defaultValue={supplierId} className="border border-gray-300 rounded-lg px-3 py-2 text-sm">
             <option value="">All suppliers</option>
             {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+          <select name="category" defaultValue={categoryId} className="border border-gray-300 rounded-lg px-3 py-2 text-sm">
+            <option value="">All categories</option>
+            <option value="none">— No category</option>
+            {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+          <select name="active" defaultValue={activeFilter} className="border border-gray-300 rounded-lg px-3 py-2 text-sm">
+            <option value="">Active &amp; Inactive</option>
+            <option value="true">Active only</option>
+            <option value="false">Inactive only</option>
           </select>
           <button type="submit" className="bg-gray-900 text-white px-4 py-2 rounded-lg text-sm shrink-0">Search</button>
         </form>
@@ -298,11 +312,11 @@ export default function ProductsTable({
             <span className="text-gray-500">Page {page} of {totalPages}</span>
             <div className="flex gap-2">
               {page > 1 && (
-                <a href={`?q=${q ?? ''}&supplier=${supplierId ?? ''}&page=${page - 1}`}
+                <a href={`?q=${q ?? ''}&supplier=${supplierId ?? ''}&category=${categoryId ?? ''}&active=${activeFilter ?? ''}&page=${page - 1}`}
                   className="px-3 py-1 border border-gray-300 rounded hover:bg-gray-50">← Prev</a>
               )}
               {page < totalPages && (
-                <a href={`?q=${q ?? ''}&supplier=${supplierId ?? ''}&page=${page + 1}`}
+                <a href={`?q=${q ?? ''}&supplier=${supplierId ?? ''}&category=${categoryId ?? ''}&active=${activeFilter ?? ''}&page=${page + 1}`}
                   className="px-3 py-1 border border-gray-300 rounded hover:bg-gray-50">Next →</a>
               )}
             </div>
