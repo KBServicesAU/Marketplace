@@ -22,39 +22,51 @@ export default function AdminLoginPage() {
       setLoading(false)
     } else {
       router.push('/admin')
+      router.refresh()
     }
   }
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-900">
-      <div className="bg-white rounded-xl shadow-lg p-8 w-full max-w-sm">
-        <h1 className="text-2xl font-bold text-gray-900 mb-6">Admin Login</h1>
+      <div className="bg-white rounded-2xl shadow-xl p-8 w-full max-w-sm">
+        <h1 className="text-2xl font-bold text-gray-900 mb-1">Admin Login</h1>
+        <p className="text-sm text-gray-400 mb-6">Marketplace admin panel</p>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+            <label className="block text-xs font-medium text-gray-500 mb-1 uppercase tracking-wide">
+              Email
+            </label>
             <input
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-gray-900"
+              autoComplete="email"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+            <label className="block text-xs font-medium text-gray-500 mb-1 uppercase tracking-wide">
+              Password
+            </label>
             <input
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-gray-900"
+              autoComplete="current-password"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
             />
           </div>
-          {error && <p className="text-red-600 text-sm">{error}</p>}
+          {error && (
+            <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+              {error}
+            </p>
+          )}
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-gray-900 text-white py-2 rounded-lg hover:bg-gray-700 disabled:opacity-50 font-medium"
+            className="w-full bg-gray-900 text-white py-2.5 rounded-full font-semibold hover:bg-gray-700 disabled:opacity-50 transition"
           >
             {loading ? 'Signing in…' : 'Sign in'}
           </button>
