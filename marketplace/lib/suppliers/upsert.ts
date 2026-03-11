@@ -129,12 +129,22 @@ async function buildProductRow(
   }
 }
 
+function normalizeImageUrl(url: string): string {
+  // Fix URLs missing the protocol (e.g. "www.supplier.com/img.jpg")
+  if (url && !url.startsWith('http://') && !url.startsWith('https://') && !url.startsWith('/')) {
+    return `https://${url}`
+  }
+  return url
+}
+
 async function uploadImage(
-  url: string,
+  rawUrl: string,
   supplierId: string,
   sku: string,
   supabase: ReturnType<typeof createServiceClient>
 ): Promise<string> {
+  const url = normalizeImageUrl(rawUrl)
+
   // If already a Supabase Storage URL, return as-is
   if (url.includes('supabase.co/storage')) return url
 

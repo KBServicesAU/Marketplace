@@ -16,9 +16,10 @@ export interface Supplier {
 
 export interface ApiConfig {
   base_url: string
-  auth_type: 'bearer' | 'api_key' | 'basic' | 'none'
+  auth_type: 'bearer' | 'oauth2' | 'api_key' | 'basic' | 'none'
   auth_value?: string
   auth_header?: string      // custom header name for api_key type
+  token_url?: string        // OAuth2 token endpoint (required when auth_type = 'oauth2')
   field_map: Record<string, string>  // their field name → our SupplierProduct field
   pagination?: {
     type: 'page' | 'cursor' | 'offset'

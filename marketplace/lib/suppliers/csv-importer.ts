@@ -44,11 +44,19 @@ function mapRowToProduct(
   columnMap: Record<string, string>
 ): SupplierProduct | null {
   const mapped: Record<string, string> = {}
+  // Collect all image URLs from multiple columns that map to 'images'
+  const imageUrls: string[] = []
 
   for (const [csvCol, productField] of Object.entries(columnMap)) {
-    const value = row[csvCol]
-    if (value !== undefined) {
-      mapped[productField] = value.trim()
+    const value = (row[csvCol] ?? '').trim()
+    if (!value) continue
+
+    if (productField === 'images') {
+      // Each column mapped to 'images' contributes its URL(s) to the list
+      const urls = value.split('|').map((u) => u.trim()).filter(Boolean)
+      imageUrls.push(...urls)
+    } else {
+      mapped[productField] = value
     }
   }
 
@@ -78,18 +86,13 @@ function mapRowToProduct(
     if (!isNaN(weight)) product.weight = weight
   }
 
-  // Images: can be a pipe-separated list of URLs
-  if (mapped['images']) {
-    product.images = mapped['images']
-      .split('|')
-      .map((u) => u.trim())
-      .filter(Boolean)
-  }
+  // Images: collected from one or more columns
+  if (imageUrls.length > 0) product.images = imageUrls
 
   // Any remaining mapped fields go into attributes
   const reservedFields = new Set([
     'supplierSku', 'name', 'costPrice', 'description',
-    'stock', 'categoryHint', 'weight', 'images',
+    'stock', 'categoryHint', 'weight', 'brand',
   ])
   const attributes: Record<string, string> = {}
   for (const [field, value] of Object.entries(mapped)) {
@@ -97,6 +100,7 @@ function mapRowToProduct(
       attributes[field] = value
     }
   }
+  if (mapped['brand']) attributes['brand'] = mapped['brand']
   if (Object.keys(attributes).length > 0) product.attributes = attributes
 
   return product

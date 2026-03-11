@@ -2,7 +2,6 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
 import type { Category } from '@/types'
 
 function toSlug(name: string) {
@@ -11,7 +10,6 @@ function toSlug(name: string) {
 
 export default function CategoryForm({ category }: { category?: Category }) {
   const router = useRouter()
-  const supabase = createClient()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
@@ -29,11 +27,26 @@ export default function CategoryForm({ category }: { category?: Category }) {
     setError('')
     setLoading(true)
     const payload = { name, slug, margin_percentage: parseFloat(margin) }
-    const { error: dbError } = category
-      ? await supabase.from('marketplace_categories').update(payload).eq('id', category.id)
-      : await supabase.from('marketplace_categories').insert(payload)
-    if (dbError) { setError(dbError.message); setLoading(false) }
-    else { router.push('/admin/categories'); router.refresh() }
+    try {
+      const url = category ? `/api/admin/categories/${category.id}` : '/api/admin/categories'
+      const method = category ? 'PUT' : 'POST'
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setError(data.error ?? 'Failed to save category')
+        setLoading(false)
+      } else {
+        router.push('/admin/categories')
+        router.refresh()
+      }
+    } catch {
+      setError('Network error — please try again')
+      setLoading(false)
+    }
   }
 
   return (
@@ -57,7 +70,7 @@ export default function CategoryForm({ category }: { category?: Category }) {
           onChange={(e) => setMargin(e.target.value)} required
           className="w-full border border-gray-300 rounded-lg px-3 py-2" />
       </div>
-      {error && <p className="text-red-600 text-sm">{error}</p>}
+      {error && <p className="text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</p>}
       <div className="flex gap-3">
         <button type="submit" disabled={loading}
           className="bg-gray-900 text-white px-6 py-2 rounded-lg hover:bg-gray-700 disabled:opacity-50 font-medium text-sm">

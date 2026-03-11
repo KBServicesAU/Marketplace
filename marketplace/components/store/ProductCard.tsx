@@ -3,8 +3,15 @@ import Image from 'next/image'
 import { formatPrice } from '@/lib/pricing'
 import type { Product } from '@/types'
 
+function normalizeUrl(url: string | null): string | null {
+  if (!url) return null
+  if (url.startsWith('http://') || url.startsWith('https://')) return url
+  if (url.startsWith('www.')) return `https://${url}`
+  return null // unparseable — skip
+}
+
 export default function ProductCard({ product }: { product: Product }) {
-  const image = product.images?.[0] ?? null
+  const image = normalizeUrl(product.images?.[0] ?? null)
 
   return (
     <Link href={`/products/${product.slug}`} className="group block">
