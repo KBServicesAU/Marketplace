@@ -82,11 +82,16 @@ export async function POST(req: NextRequest) {
 
         send({ step: 'loading', message: `Found ${uncategorized.length.toLocaleString()} uncategorized products across ${pageIndex + 1} page${pageIndex > 0 ? 's' : ''}. Grouping by category hint…` })
 
-        // Group product IDs by their hint (categoryHint attr, brand attr, or first word of name)
+        // Group product IDs by their hint
+        // Uses "Tier1 > Tier2" when both exist for more precise AI categorization
         const hintGroups: Record<string, string[]> = {}
         for (const p of uncategorized) {
           const attrs = p.attributes as Record<string, string> | null
-          const hint = attrs?.categoryHint ?? attrs?.brand ?? p.name.split(' ')[0] ?? 'General'
+          const tier1 = attrs?.categoryHint
+          const tier2 = attrs?.subCategory
+          const hint = tier1
+            ? (tier2 ? `${tier1} > ${tier2}` : tier1)
+            : (attrs?.brand ?? p.name.split(' ')[0] ?? 'General')
           if (!hintGroups[hint]) hintGroups[hint] = []
           hintGroups[hint].push(p.id)
         }

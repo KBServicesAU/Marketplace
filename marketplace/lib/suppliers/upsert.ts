@@ -18,14 +18,18 @@ export async function upsertProducts(
   const supabase = createServiceClient()
   const result: ImportResult = { imported: 0, updated: 0, failed: 0, errors: [] }
 
-  // Fetch the category margins we may need
+  // Fetch categories for margin lookup AND name-based auto-assignment from categoryHint
   const { data: categories } = await supabase
     .from('marketplace_categories')
-    .select('id, margin_percentage')
+    .select('id, name, slug, margin_percentage')
 
   const marginMap: Record<string, number> = {}
+  // Case-insensitive name/slug → id map so products auto-assign if categoryHint matches
+  const categoryNameMap: Record<string, string> = {}
   for (const cat of categories ?? []) {
     marginMap[cat.id] = cat.margin_percentage
+    categoryNameMap[cat.name.toLowerCase().trim()] = cat.id
+    if (cat.slug) categoryNameMap[cat.slug.toLowerCase().trim()] = cat.id
   }
 
   // Fetch existing skus for this supplier to detect insert vs update
@@ -43,7 +47,7 @@ export async function upsertProducts(
     const rows = await Promise.all(
       batch.map(async (p) => {
         try {
-          return await buildProductRow(p, supplierId, defaultCategoryId, marginMap, supabase)
+          return await buildProductRow(p, supplierId, defaultCategoryId, marginMap, categoryNameMap, supabase)
         } catch (err) {
           result.failed++
           result.errors.push({ sku: p.supplierSku, error: String(err) })
@@ -96,9 +100,15 @@ async function buildProductRow(
   supplierId: string,
   defaultCategoryId: string | null,
   marginMap: Record<string, number>,
+  categoryNameMap: Record<string, string>,
   supabase: ReturnType<typeof createServiceClient>
 ) {
-  const categoryId = defaultCategoryId
+  // Auto-assign: match categoryHint against existing category names/slugs
+  let categoryId = defaultCategoryId
+  if (p.categoryHint) {
+    const matched = categoryNameMap[p.categoryHint.toLowerCase().trim()]
+    if (matched) categoryId = matched
+  }
   const margin = categoryId ? (marginMap[categoryId] ?? 30) : 30
   const sellingPrice = calculateSellingPrice(p.costPrice, margin)
   const slug = generateSlug(p.name, p.supplierSku)

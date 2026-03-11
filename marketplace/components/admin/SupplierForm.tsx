@@ -12,29 +12,43 @@ const PRESETS = [
     label: 'Dynamic Supplies (CSV)',
     type: 'spreadsheet' as const,
     columnMap: {
+      // Core fields
       'Dynamic Supplies SKU': 'supplierSku',
       'Name': 'name',
-      'Reseller Price Ex GST': 'costPrice',
       'Description': 'description',
+      'Reseller Price Ex GST': 'costPrice',
       'VIRTUAL': 'stock',
-      'Main Image URL': 'images',
-      'Alt Image 1': 'images2',
-      'Alt Image 2': 'images3',
-      'Cat Tier 1': 'categoryHint',
       'Brand': 'brand',
+      // Images — ALL must map to 'images' to be collected into the array
+      'Main Image URL': 'images',
+      'Alt Image 1': 'images',
+      'Alt Image 2': 'images',
+      'Alt Image 3': 'images',
+      // Brochure PDF — stored in attributes.brochureUrl
+      'Product Brochure': 'brochureUrl',
+      // Category hierarchy
+      'Cat Tier 1': 'categoryHint',    // auto-matched to existing categories on import
+      'Cat Tier 2': 'subCategory',     // stored in attributes
+      'Cat Tier 3': 'subSubCategory',  // stored in attributes
     },
   },
   {
-    label: 'PRODFEED Supplier (CSV)',
+    label: 'PRODFEED / Sektor (CSV)',
     type: 'spreadsheet' as const,
     columnMap: {
       'Stockcode': 'supplierSku',
       'Description': 'name',
+      'Long Description': 'description',
       'Buy': 'costPrice',
       'Stock Level': 'stock',
-      'Image URL': 'images',
       'Brand': 'brand',
+      // Images — map all image columns to 'images'
+      'Image URL': 'images',
+      'Image URL 2': 'images',
+      'Image URL 3': 'images',
+      // Categories
       'Core Product': 'categoryHint',
+      'Category': 'subCategory',
     },
   },
   {
@@ -178,24 +192,24 @@ export default function SupplierForm({ supplier }: { supplier?: Supplier }) {
   return (
     <form onSubmit={handleSubmit} className="space-y-6 bg-white rounded-xl border border-gray-200 p-6">
 
-      {/* Quick-setup presets */}
-      {!supplier && (
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-          <p className="text-sm font-medium text-blue-800 mb-2">Quick setup — choose a supplier template:</p>
-          <div className="flex flex-wrap gap-2">
-            {PRESETS.map((p) => (
-              <button
+      {/* Quick-setup presets — shown when creating AND when editing */}
+      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+        <p className="text-sm font-medium text-blue-800 mb-2">
+          {supplier ? 'Apply a template to update the column/field map:' : 'Quick setup — choose a supplier template:'}
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {PRESETS.map((p) => (
+            <button
                 key={p.label}
                 type="button"
                 onClick={() => applyPreset(p)}
                 className="text-xs bg-white border border-blue-300 text-blue-700 px-3 py-1.5 rounded-lg hover:bg-blue-100 transition"
               >
                 {p.label}
-              </button>
-            ))}
-          </div>
+            </button>
+          ))}
         </div>
-      )}
+      </div>
 
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-1">Supplier Name</label>

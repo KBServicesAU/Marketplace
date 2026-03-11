@@ -286,6 +286,24 @@ export default function ProductDetailPanel({
             </div>
           )}
 
+          {/* Brochure / data-sheet link */}
+          {product.attributes?.brochureUrl && (
+            <div>
+              <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Product Brochure</h3>
+              <a
+                href={product.attributes.brochureUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 text-sm text-blue-600 hover:text-blue-800 hover:underline bg-blue-50 border border-blue-200 px-3 py-2 rounded-lg"
+              >
+                <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                </svg>
+                View Product Brochure / Data Sheet
+              </a>
+            </div>
+          )}
+
           {/* Image URLs list */}
           {images.length > 0 && (
             <div>
